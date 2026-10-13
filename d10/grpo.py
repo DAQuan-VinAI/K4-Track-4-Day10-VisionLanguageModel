@@ -83,6 +83,12 @@ def main(argv=None):
         use_cpu=not use_cuda)
     trainer = GRPOTrainer(model=model, reward_funcs=iou_reward, args=args, train_dataset=dataset,
                           processing_class=processor)
+    # For a quantised model trl casts every trainable adapter weight to bf16 inside __init__.
+    # fp16 GradScaler cannot unscale bf16 gradients (and a T4 has no native bf16), so the adapter
+    # goes back to float32, exactly as in SFT. The optimizer is only created inside train().
+    for p in model.parameters():
+        if p.requires_grad:
+            p.data = p.data.float()
     t0 = time.time()
     trainer.train()
     minutes = (time.time() - t0) / 60
