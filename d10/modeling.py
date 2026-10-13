@@ -49,6 +49,19 @@ def load_base(model_id):
     return model
 
 
+def ignore_incompatible_torchao():
+    """Kaggle ships torchao 0.10, which this peft rejects with an ImportError as soon as LoRA is
+    put on a plain nn.Linear (the fp16 ViT in E3). Nothing here uses torchao-quantised layers,
+    so peft's torchao dispatcher is told that the package is simply not available."""
+    import peft.import_utils
+    import peft.tuners.lora.torchao as lora_torchao
+    try:
+        peft.import_utils.is_torchao_available()
+    except ImportError as e:
+        print(f"note: {e}; ignoring torchao")
+        lora_torchao.is_torchao_available = lambda: False
+
+
 def is_projector(name):
     return any(k in name for k in PROJECTOR_KEYS)
 
@@ -64,6 +77,7 @@ def apply_setup(model, cfg):
     """Freeze everything, add LoRA on the LLM (E1, E2) or LLM + ViT (E3), and for E2/E3 also
     unfreeze the full projector in float32. Returns (peft_model, info)."""
     from peft import LoraConfig, get_peft_model
+    ignore_incompatible_torchao()
     for p in model.parameters():
         p.requires_grad = False
     model.enable_input_require_grads()            # gradient checkpointing needs inputs with grad
@@ -123,6 +137,7 @@ def load_projector(base, run_dir):
 def load_finetuned(model_id, run_dir, trainable=False):
     """Base 4-bit model -> restore trained projector (if any) -> attach the LoRA adapter."""
     from peft import PeftModel
+    ignore_incompatible_torchao()
     base = load_base(model_id)
     n_proj = load_projector(base, run_dir)
     if trainable:
