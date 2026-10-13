@@ -28,14 +28,25 @@ def load_processor(model_id):
 
 
 def load_base(model_id):
-    """4-bit NF4 base model. `visual` and `lm_head` are skipped, i.e. they stay in fp16:
-    a 4-bit ViT would leave the merger with quantised weights that cannot be fully trained."""
+    """4-bit NF4 base model. The ViT (with the projector) and `lm_head` are skipped, i.e. they
+    stay in fp16: a 4-bit ViT would leave the merger with quantised weights that cannot be
+    fully trained.
+
+    transformers matches a skip pattern against the START of the full module name (or as its
+    suffix), and the ViT is called `model.visual`. The bare pattern "visual" therefore skips
+    nothing and the whole ViT is silently quantised; "model.visual" is the one that works.
+    """
     from transformers import BitsAndBytesConfig, Qwen3VLForConditionalGeneration
     quant = BitsAndBytesConfig(
         load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_use_double_quant=True, llm_int8_skip_modules=["visual", "lm_head"])
-    return Qwen3VLForConditionalGeneration.from_pretrained(
+        bnb_4bit_use_double_quant=True, llm_int8_skip_modules=["model.visual", "visual", "lm_head"])
+    model = Qwen3VLForConditionalGeneration.from_pretrained(
         model_id, quantization_config=quant, dtype=torch.float16, device_map={"": 0})
+    quantised = [n for n, p in model.named_parameters()
+                 if ("visual." in n or n.startswith("lm_head")) and not p.is_floating_point()]
+    if quantised:
+        raise RuntimeError(f"{len(quantised)} ViT/lm_head tensors were quantised, e.g. {quantised[0]}")
+    return model
 
 
 def is_projector(name):
